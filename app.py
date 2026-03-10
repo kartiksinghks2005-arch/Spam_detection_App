@@ -6,6 +6,7 @@ from wordcloud import WordCloud
 import matplotlib.pyplot as plt
 import json
 import PyPDF2
+import os
 
 # ---------- GROQ CLIENT ----------
 client = Groq(api_key="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")
@@ -34,6 +35,7 @@ border-radius:10px;
 
 
 # ---------- HELPER FUNCTIONS ----------
+
 def show_confidence(prob):
 
     st.progress(prob)
@@ -55,6 +57,20 @@ def highlight_words(text, words):
         )
 
     return text
+
+
+def calculate_threat_score(prob):
+
+    score = int(prob * 100)
+
+    if score >= 80:
+        level = "HIGH"
+    elif score >= 50:
+        level = "MEDIUM"
+    else:
+        level = "LOW"
+
+    return score, level
 
 
 # ---------- LLM ANALYSIS ----------
@@ -89,6 +105,7 @@ Message:
 
         return f"LLM Error: {e}"
 
+
 # =========================================================
 # SIDEBAR
 # =========================================================
@@ -114,7 +131,7 @@ if page == "🏠 Home":
 
     col1.info("✔ Detect Spam Messages")
     col1.info("✔ Show Spam Probability")
-    col1.info("✔ WordCloud Visualization")
+    col1.info("✔ Threat Score System")
     col1.info("✔ Multi File Scanner")
 
     col2.success("🚀 Built with")
@@ -153,17 +170,29 @@ elif page == "📩 Single Message":
             st.subheader("Result")
 
             if prediction == "spam":
-
                 st.error("🚨 Spam Message Detected")
-
             else:
-
                 st.success("✅ Safe Message")
 
+            # ---------- CONFIDENCE ----------
             st.subheader("📊 Confidence")
-
             show_confidence(prob)
 
+            # ---------- THREAT SCORE ----------
+            score, level = calculate_threat_score(prob)
+
+            st.subheader("🚨 Threat Score")
+
+            st.metric("Threat Score", f"{score}/100")
+
+            if level == "HIGH":
+                st.error(f"Risk Level: {level}")
+            elif level == "MEDIUM":
+                st.warning(f"Risk Level: {level}")
+            else:
+                st.success(f"Risk Level: {level}")
+
+            # ---------- SUSPICIOUS WORDS ----------
             words = message.lower().split()
 
             vocab = vectorizer.get_feature_names_out()
@@ -176,7 +205,7 @@ elif page == "📩 Single Message":
 
             st.markdown(highlighted, unsafe_allow_html=True)
 
-            # WORDCLOUD
+            # ---------- WORDCLOUD ----------
             st.subheader("☁️ WordCloud")
 
             wc = WordCloud(
@@ -223,28 +252,19 @@ elif page == "📂 Bulk Scanner":
 
         file_type = uploaded_file.name.split(".")[-1]
 
-        # ---------- READ FILE ----------
-
         if file_type == "csv":
-
             df = pd.read_csv(uploaded_file)
 
         elif file_type == "xlsx":
-
             df = pd.read_excel(uploaded_file)
 
         elif file_type == "txt":
-
             text = uploaded_file.read().decode("utf-8")
-
             messages = text.split("\n")
-
             df = pd.DataFrame(messages, columns=["message"])
 
         elif file_type == "json":
-
             data = json.load(uploaded_file)
-
             df = pd.DataFrame(data)
 
         elif file_type == "pdf":
@@ -254,7 +274,6 @@ elif page == "📂 Bulk Scanner":
             text = ""
 
             for page in reader.pages:
-
                 text += page.extract_text()
 
             messages = text.split("\n")
@@ -262,43 +281,41 @@ elif page == "📂 Bulk Scanner":
             df = pd.DataFrame(messages, columns=["message"])
 
         else:
-
             st.error("Unsupported file format")
-
             st.stop()
 
         if "message" not in df.columns:
-
             st.error("File must contain column 'message'")
-
             st.stop()
 
         # ---------- SPAM DETECTION ----------
-
         vectors = vectorizer.transform(df["message"]).toarray()
 
         df["Prediction"] = model.predict(vectors)
 
         df["Spam Probability"] = model.predict_proba(vectors)[:,1]
 
+        # ---------- THREAT SCORE ----------
+        df["Threat Score"] = (df["Spam Probability"] * 100).astype(int)
+
+        df["Risk Level"] = df["Threat Score"].apply(
+            lambda x: "HIGH" if x >= 80 else "MEDIUM" if x >= 50 else "LOW"
+        )
+
         # ---------- AI EXPLANATION ----------
-
         with st.spinner("Running AI analysis..."):
-
-            df["AI Explanation"] = df["message"].apply(llm_analysis)
+            df["AI Explanation"] = df["message"].astype(str).apply(llm_analysis)
 
         st.success("Scan Completed")
 
         st.dataframe(df.head())
 
         # ---------- SUMMARY ----------
-
         st.header("📊 Summary")
 
         summary = df["Prediction"].value_counts()
 
         spam = summary.get("spam",0)
-
         ham = summary.get("ham",0)
 
         fig, ax = plt.subplots()
@@ -313,13 +330,11 @@ elif page == "📂 Bulk Scanner":
         st.pyplot(fig)
 
         # ---------- TREND CHART ----------
-
         st.subheader("Spam Trend")
 
         st.bar_chart(df["Prediction"].value_counts())
 
         # ---------- DOWNLOAD ----------
-
         csv = df.to_csv(index=False).encode()
 
         st.download_button(
@@ -338,7 +353,6 @@ elif page == "📊 Dashboard":
     st.header("📊 Model Insights")
 
     st.metric("Model Type","Naive Bayes")
-
     st.metric("Vectorizer","CountVectorizer")
 
     st.success("ML pipeline running correctly")
@@ -359,6 +373,7 @@ Features:
 
 • ML Spam Detection  
 • AI Explanation  
+• Threat Score System  
 • Suspicious Word Highlighting  
 • WordCloud Visualization  
 • Multi File Bulk Scanner  
